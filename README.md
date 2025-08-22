@@ -1,260 +1,239 @@
-# Enhanced LinkedIn Job Scraper
+# LinkedIn Job Scraper with Smart Fallback System
 
-A comprehensive LinkedIn job scraping tool with advanced filtering options, robust error handling, and batch processing capabilities.
+A comprehensive LinkedIn job scraper built with the `python-jobspy` library, featuring intelligent company name matching, advanced parameterization, and robust CSV handling capabilities.
 
 ## Features
 
-### Core Functionality
-- **Multi-company batch processing** from CSV files
-- **Advanced job filtering** by time, type, location, and keywords
-- **Comprehensive error handling** with detailed logging
-- **Progress tracking** and structured output files
-- **Fallback company name support** for better job discovery
-- **Command-line interface** with extensive parameter support
+### 🎯 Smart Fallback System
+- **Three-tier fallback mechanism** for maximum job discovery success:
+  1. **Primary search**: Uses the original company name
+  2. **Manual fallback**: Uses user-provided alternative company name
+  3. **Auto-cleaned fallback**: Automatically removes corporate suffixes (Inc., LLC, Corp., etc.)
 
-### New Parameters Added
-- `hours_old`: Filter jobs by hours since posting (default: 720 hours / 30 days)
-- `search_term`: Additional keywords to filter jobs (optional)
-- `linkedin_fetch_description`: Fetch full job descriptions (default: False)
-- `results_wanted`: Maximum number of jobs per company (optional)
-- `job_type`: Employment type filter (fulltime, parttime, internship, contract)
-- `distance`: Search radius in miles (default: 50)
+### 📊 Advanced Parameterization
+- **Time filtering**: Filter jobs by hours since posting (default: 30 days)
+- **Search terms**: Add specific job search keywords
+- **Job types**: Filter by employment type (fulltime, parttime, internship, contract)
+- **Location radius**: Customizable search distance in miles
+- **Result limits**: Control maximum number of results returned
+- **Description fetching**: Option to retrieve full job descriptions
+
+### 📁 Robust CSV Handling
+- **Quote-aware parsing**: Handles company names with commas and special characters
+- **Encoding support**: Multiple encoding fallbacks (UTF-8, Latin-1, CP1252)
+- **Data validation**: Skips empty or invalid company entries
+- **Flexible column mapping**: Supports various CSV formats
+
+### 🔄 Error Handling & Logging
+- **Comprehensive logging**: Track all scraping attempts and fallbacks
+- **Rate limiting awareness**: Built-in error handling for API limits
+- **Graceful degradation**: Returns empty results instead of crashing
 
 ## Installation
 
-```bash
-pip install python-jobspy pandas requests
-```
+1. **Clone or download** this repository
+2. **Install dependencies**:
+   ```bash
+   pip install python-jobspy pandas requests argparse
+   ```
 
 ## Usage
 
-### Basic Usage
+### Command Line Interface
+
+#### Basic Usage
 ```bash
-python index.py companies.csv "San Francisco, CA" ./output
+python index.py --csv companies.csv --location "San Francisco, CA"
 ```
 
-### Advanced Filtering
+#### Advanced Usage with Parameters
 ```bash
-python index.py companies.csv "Remote" ./output \
-    --hours-old 168 \
-    --job-type fulltime \
-    --search-term "software engineer" \
-    --results-wanted 50 \
-    --distance 25
+python index.py \
+  --csv companies.csv \
+  --location "New York, NY" \
+  --hours_old 168 \
+  --search_term "software engineer" \
+  --job_type fulltime \
+  --distance 25 \
+  --results_wanted 100 \
+  --fetch_descriptions
 ```
 
-### Batch Processing
-```bash
-python index.py companies.csv "New York, NY" ./output \
-    --start 0 --end 99 \
-    --fetch-description \
-    --job-type internship
-```
+### Parameter Reference
 
-## Command Line Arguments
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `--csv` | str | Required | Path to CSV file containing company names |
+| `--location` | str | Required | Geographic location for job search |
+| `--hours_old` | int | 720 | Filter jobs posted within X hours (720 = 30 days) |
+| `--search_term` | str | None | Additional search keywords (e.g., "Python developer") |
+| `--job_type` | str | None | Employment type: `fulltime`, `parttime`, `internship`, `contract` |
+| `--distance` | int | 50 | Search radius in miles from location |
+| `--results_wanted` | int | None | Maximum number of results per company |
+| `--fetch_descriptions` | flag | False | Fetch full job descriptions (slower but more detailed) |
 
-### Required Arguments
-- `csv_file`: Input CSV file with company names (must have "Company" column)
-- `location`: Geographic location for job search
-- `output_dir`: Directory for output files
+### CSV Format Requirements
 
-### Optional Arguments
-- `--start INT`: Starting row index (0-based, default: 0)
-- `--end INT`: Ending row index (0-based, default: process all)
-- `--hours-old INT`: Filter by hours since posting (default: 720)
-- `--search-term STR`: Additional search keywords
-- `--job-type {fulltime,parttime,internship,contract}`: Employment type filter
-- `--results-wanted INT`: Max results per company
-- `--distance INT`: Search radius in miles (default: 50)
-- `--fetch-description`: Fetch full job descriptions (WARNING: slow)
+Your CSV file should contain a `Company` column with company names:
 
-## Input CSV Format
-
-### Required Columns
-- `Company`: Primary company name for job search
-
-### Optional Columns
-- `Company Name for Emails`: Alternative company name used as fallback
-
-### Example CSV
 ```csv
 Company,Company Name for Emails
-Google,Google LLC
-Microsoft,Microsoft Corporation
-Apple Inc,Apple
-Meta,Facebook
+"Apple Inc.","Apple"
+"Microsoft Corporation","Microsoft"
+"Google LLC","Alphabet Inc."
+"Amazon.com, Inc.","Amazon"
 ```
 
-## Output Files
+**Supported formats:**
+- Simple company names: `Apple`, `Microsoft`
+- Companies with commas: `"Amazon.com, Inc."`, `"2Go Group, Inc."`
+- Optional fallback column: `Company Name for Emails`
 
-The scraper creates three output files in the specified directory:
+## Smart Fallback Examples
 
-### 1. jobs.csv
-Main output file containing all successfully scraped job listings with columns:
+### Automatic Suffix Removal
+The scraper automatically tries cleaned company names when the original search fails:
+
+| Original Company Name | Auto-Cleaned Fallback |
+|----------------------|------------------------|
+| `Apple Inc.` | `Apple` |
+| `Microsoft Corporation` | `Microsoft` |
+| `Google LLC` | `Google` |
+| `Amazon.com, Inc.` | `Amazon.com` |
+| `Tesla, Inc.` | `Tesla` |
+
+### Fallback Sequence
+For each company, the scraper tries up to 3 variations:
+
+1. **Original name**: `"Microsoft Corporation"`
+2. **Manual fallback**: `"Microsoft"` (if provided in CSV)
+3. **Auto-cleaned**: `"Microsoft"` (suffix removed automatically)
+
+## Programmatic Usage
+
+```python
+from index import scrape_company_linkedin_jobs
+
+# Basic usage
+jobs = scrape_company_linkedin_jobs(
+    company_name="Apple Inc.",
+    location="Cupertino, CA"
+)
+
+# Advanced usage with all parameters
+jobs = scrape_company_linkedin_jobs(
+    company_name="Google LLC",
+    location="Mountain View, CA",
+    fallback_company_name="Alphabet Inc.",
+    hours_old=168,  # Last week
+    search_term="machine learning engineer",
+    job_type="fulltime",
+    distance=25,
+    results_wanted=50,
+    linkedin_fetch_description=True
+)
+
+print(f"Found {len(jobs)} jobs")
+```
+
+## Output Format
+
+The scraper returns a pandas DataFrame with the following columns:
+
+### Core Job Information
 - `site`: Job board source (always 'linkedin')
 - `title`: Job title
 - `company`: Company name
 - `location`: Job location
 - `date_posted`: When the job was posted
 - `job_type`: Employment type
-- `job_url`: URL to the job posting
-- `description`: Job description (if --fetch-description enabled)
-- `salary_source`: Salary information source
-- `min_amount`, `max_amount`: Salary range
+- `job_url`: Direct link to job posting
+
+### Salary Information
+- `min_amount`: Minimum salary
+- `max_amount`: Maximum salary
 - `currency`: Salary currency
-- `interval`: Salary interval (yearly, hourly, etc.)
-- Additional metadata columns
+- `interval`: Salary interval (yearly, monthly, etc.)
 
-### 2. no_jobs_found.csv
-Companies for which no jobs were found:
-- `Company`: Company name
+### Additional Metadata
+- `description`: Full job description (if `fetch_descriptions=True`)
+- `job_level`: Seniority level
+- `company_industry`: Industry classification
+- `benefits`: Listed benefits (if available)
 
-### 3. error_records.csv
-Companies that encountered errors during scraping:
-- `Company`: Company name
-- `Error`: Error description
+## Logging
 
-## Performance Considerations
+The scraper provides detailed logging for troubleshooting:
 
-### Rate Limiting
-- Built-in 1-second delay between company requests
-- Respects LinkedIn API limitations automatically
-- Monitor logs for rate limit warnings
-
-### Execution Time
-- **Normal mode**: ~1-2 seconds per company
-- **With --fetch-description**: ~5-10 seconds per company
-- **Large batches**: Consider processing in smaller chunks
-
-### Memory Usage
-- Efficient memory usage with streaming CSV processing
-- Output files written incrementally
-- Safe for processing thousands of companies
+```
+INFO - Processing company: Apple Inc.
+INFO - No jobs found for Apple Inc. Retrying with cleaned name: Apple
+INFO - Found 15 jobs using cleaned company name: Apple
+INFO - Successfully scraped 15 jobs for Apple Inc.
+```
 
 ## Error Handling
 
-### Network Errors
-- Automatic retry logic for transient failures
-- Detailed error logging with timestamps
-- Graceful degradation for API issues
+### Common Issues and Solutions
 
-### Data Validation
-- Input CSV validation
-- Parameter validation with helpful error messages
-- Fallback mechanisms for missing data
+1. **No jobs found**: The scraper automatically tries fallback names
+2. **Rate limiting**: Built-in delays and error handling
+3. **CSV parsing errors**: Multiple encoding attempts and quote handling
+4. **Invalid company names**: Automatic skipping with logging
 
-### Recovery
-- Process continues even if individual companies fail
-- Resumable processing using --start and --end parameters
-- Detailed error records for troubleshooting
+### Best Practices
 
-## Advanced Usage Examples
+- **Use reasonable time filters**: Don't go back too far (hours_old)
+- **Limit results for testing**: Use `results_wanted` parameter
+- **Monitor rate limits**: LinkedIn has usage restrictions
+- **Check logs**: Use logging output to debug issues
 
-### Process specific time ranges
+## Dependencies
+
+- `python-jobspy`: Core job scraping functionality
+- `pandas`: CSV handling and data manipulation
+- `requests`: HTTP requests and URL encoding
+- `argparse`: Command-line argument parsing
+- `logging`: Comprehensive logging system
+
+## Examples
+
+### Test the Fallback System
 ```bash
-# Jobs from last 24 hours only
-python index.py companies.csv "Remote" ./output --hours-old 24
-
-# Jobs from last week
-python index.py companies.csv "San Francisco, CA" ./output --hours-old 168
+python test_fallbacks.py
 ```
 
-### Target specific job types
+### Scrape Multiple Companies
 ```bash
-# Full-time positions only
-python index.py companies.csv "New York, NY" ./output --job-type fulltime
-
-# Internships only
-python index.py companies.csv "Boston, MA" ./output --job-type internship
+python index.py --csv examples/companies.csv --location "Seattle, WA" --job_type fulltime
 ```
 
-### Combine multiple filters
+### Get Recent Jobs Only
 ```bash
-# Python jobs, full-time, from last 3 days, max 25 per company
-python index.py companies.csv "Remote" ./output \
-    --search-term "python developer" \
-    --job-type fulltime \
-    --hours-old 72 \
-    --results-wanted 25
+python index.py --csv companies.csv --location "Austin, TX" --hours_old 24
 ```
 
-### Resume interrupted processing
+### Search for Specific Roles
 ```bash
-# Process companies 100-199 (if previous run stopped at company 99)
-python index.py companies.csv "Seattle, WA" ./output --start 100 --end 199
+python index.py --csv companies.csv --location "Boston, MA" --search_term "data scientist"
 ```
-
-## Monitoring and Logging
-
-### Log Levels
-- **INFO**: Normal progress updates
-- **WARNING**: Non-critical issues (e.g., no jobs found)
-- **ERROR**: Critical failures requiring attention
-
-### Progress Tracking
-```
-2025-08-22 10:30:15 - INFO - Processing company 25/100: Google
-2025-08-22 10:30:17 - INFO - Saved 15 jobs for Google
-2025-08-22 10:30:19 - INFO - Processing company 26/100: Microsoft
-```
-
-### Configuration Summary
-The scraper logs all configuration details at startup:
-```
-================================================================================
-LinkedIn Job Scraper - Enhanced Version
-================================================================================
-Input CSV: companies.csv
-Location: San Francisco, CA
-Output Directory: ./output
-Row Range: 0 to end
-Time Filter: 1 week (168 hours)
-Search Term: software engineer
-Job Type: fulltime
-Results Wanted: 50
-Distance: 25 miles
-Fetch Descriptions: False
-================================================================================
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **No jobs found for any company**
-   - Check if company names match LinkedIn exactly
-   - Verify location spelling
-   - Try broader search terms
-
-2. **Rate limiting errors**
-   - Reduce batch size
-   - Increase delays between requests
-   - Use proxies if available
-
-3. **Empty output files**
-   - Check CSV file format
-   - Verify column names
-   - Review error_records.csv for issues
-
-4. **Slow performance**
-   - Avoid --fetch-description for large batches
-   - Process in smaller chunks
-   - Use specific job type filters
-
-### Getting Help
-- Check error_records.csv for specific error messages
-- Review log output for warnings
-- Validate input CSV format
-- Test with a small batch first
-
-## License
-
-MIT License - feel free to modify and distribute.
 
 ## Contributing
 
-Contributions welcome! Please:
-1. Test changes thoroughly
-2. Update documentation
-3. Follow existing code style
-4. Add appropriate logging
+This scraper is designed to be robust and extensible. Key areas for enhancement:
+
+- Additional job sites support
+- More sophisticated company name matching
+- Enhanced data export formats
+- Integration with job tracking systems
+
+## Notes
+
+- **LinkedIn Rate Limits**: Be respectful of LinkedIn's API usage policies
+- **Legal Compliance**: Ensure your usage complies with LinkedIn's terms of service
+- **Data Privacy**: Handle scraped data responsibly and in compliance with privacy laws
+
+---
+
+**Version**: 2.0 with Smart Fallback System
+**Last Updated**: August 2025

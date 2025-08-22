@@ -97,6 +97,85 @@ def validate_job_type(job_type: Optional[str]) -> bool:
     return job_type.lower() in valid_types
 
 
+def clean_company_name(company_name: str) -> Optional[str]:
+    """
+    Remove common corporate suffixes from company names for better LinkedIn matching.
+
+    This function attempts to create a cleaner version of the company name by removing
+    common corporate suffixes that might prevent successful LinkedIn company ID lookup.
+
+    Args:
+        company_name (str): Original company name
+
+    Returns:
+        Optional[str]: Cleaned company name without common suffixes, or None if
+        the cleaned name would be too short or identical to the original
+
+    Common Suffixes Removed:
+        - ", Inc." and " Inc." (with or without period)
+        - ", LLC" and " LLC"
+        - ", Corp." and " Corp."
+        - ", Corporation" and " Corporation"
+        - ", Ltd." and " Ltd."
+        - ", Limited" and " Limited"
+        - ", Co." and " Co."
+        - ", Company" and " Company"
+
+    Notes:
+        - Case-insensitive matching
+        - Preserves original capitalization of the remaining name
+        - Returns None if the cleaned name would be less than 2 characters
+        - Returns None if no suffixes were found (identical to original)
+
+    Example:
+        >>> clean_company_name("Apple Inc.")
+        'Apple'
+        >>> clean_company_name("Microsoft Corporation")
+        'Microsoft'
+        >>> clean_company_name("Google LLC")
+        'Google'
+        >>> clean_company_name("IBM")  # No suffix to remove
+        None
+    """
+    if not company_name or len(company_name.strip()) < 3:
+        return None
+
+    original_name = company_name.strip()
+    cleaned_name = original_name
+
+    # Common corporate suffixes to remove (order matters - longer first)
+    suffixes_to_remove = [
+        ', Corporation',
+        ' Corporation',
+        ', Company',
+        ' Company',
+        ', Limited',
+        ' Limited',
+        ', Corp.',
+        ' Corp.',
+        ', Inc.',
+        ' Inc.',
+        ', LLC',
+        ' LLC',
+        ', Ltd.',
+        ' Ltd.',
+        ', Co.',
+        ' Co.'
+    ]
+
+    # Try to remove suffixes (case-insensitive)
+    for suffix in suffixes_to_remove:
+        if cleaned_name.lower().endswith(suffix.lower()):
+            cleaned_name = cleaned_name[:-len(suffix)].strip()
+            break
+
+    # Return None if no changes were made or result is too short
+    if cleaned_name == original_name or len(cleaned_name) < 2:
+        return None
+
+    return cleaned_name
+
+
 def format_duration(hours: int) -> str:
     """
     Format hours into human-readable duration string.
@@ -208,11 +287,14 @@ def scrape_company_linkedin_jobs(
     distance: int = 50
 ) -> pd.DataFrame:
     """
-    Scrape LinkedIn jobs for a specific company with advanced filtering options.
+    Scrape LinkedIn jobs for a specific company with advanced filtering options and smart fallback mechanisms.
 
     This function attempts to retrieve LinkedIn jobs for a given company using the
     python-jobspy library. It includes comprehensive error handling and supports
-    fallback company names for better job discovery.
+    multiple fallback strategies for better job discovery:
+    1. Primary company name search
+    2. Manual fallback company name (if provided)
+    3. Automatic suffix removal (Inc., LLC, Corp., etc.)
 
     Args:
         company_name (str): Primary company name to search for jobs
@@ -249,6 +331,15 @@ def scrape_company_linkedin_jobs(
 
             Returns empty DataFrame if no jobs found or if errors occur.
 
+    Fallback Strategy:
+        1. Searches with the original company name
+        2. If no results and fallback_company_name provided, tries the fallback name
+        3. If still no results, automatically tries removing common corporate suffixes:
+           - ", Inc." / " Inc." / ", LLC" / " LLC"
+           - ", Corp." / " Corp." / ", Corporation" / " Corporation"
+           - ", Ltd." / " Ltd." / ", Limited" / " Limited"
+           - ", Co." / " Co." / ", Company" / " Company"
+
     Raises:
         Exception: Logs errors but does not raise them, returning empty DataFrame instead
 
@@ -256,11 +347,12 @@ def scrape_company_linkedin_jobs(
         - LinkedIn API has rate limiting; function includes basic error handling
         - Large companies may have many job postings; consider using results_wanted to limit
         - Setting linkedin_fetch_description=True significantly increases execution time
-        - Function automatically retries with fallback_company_name if provided and initial search fails
+        - Fallback mechanisms help handle companies with inconsistent naming on LinkedIn
+        - Function tries up to 3 different company name variations automatically
 
     Example:
         >>> jobs = scrape_company_linkedin_jobs(
-        ...     company_name="Google",
+        ...     company_name="Apple Inc.",  # Will also try "Apple" automatically
         ...     location="Mountain View, CA",
         ...     hours_old=168,  # Last week
         ...     search_term="software engineer",
@@ -298,17 +390,31 @@ def scrape_company_linkedin_jobs(
 
         jobs = scrape_jobs(**scrape_params)
 
-        # If jobs are empty and fallback is available, try with fallback company name
+        # Fallback Strategy 1: Manual fallback company name
         if jobs.empty and fallback_company_name:
             logger.info(f"No jobs found for {company_name}. Retrying with fallback: {fallback_company_name}")
             fallback_company_id = get_company_linkedin_id(fallback_company_name)
-            if fallback_company_id is None:
-                logger.warning(f"No LinkedIn ID found for fallback company: {fallback_company_name}")
-                return pd.DataFrame()
+            if fallback_company_id is not None:
+                fallback_company_id = int(fallback_company_id)
+                scrape_params["linkedin_company_ids"] = [fallback_company_id]
+                jobs = scrape_jobs(**scrape_params)
 
-            fallback_company_id = int(fallback_company_id)
-            scrape_params["linkedin_company_ids"] = [fallback_company_id]
-            jobs = scrape_jobs(**scrape_params)
+                if not jobs.empty:
+                    logger.info(f"Found {len(jobs)} jobs using fallback company name: {fallback_company_name}")
+
+        # Fallback Strategy 2: Automatic suffix removal
+        if jobs.empty:
+            cleaned_company_name = clean_company_name(company_name)
+            if cleaned_company_name:
+                logger.info(f"No jobs found for {company_name}. Retrying with cleaned name: {cleaned_company_name}")
+                cleaned_company_id = get_company_linkedin_id(cleaned_company_name)
+                if cleaned_company_id is not None:
+                    cleaned_company_id = int(cleaned_company_id)
+                    scrape_params["linkedin_company_ids"] = [cleaned_company_id]
+                    jobs = scrape_jobs(**scrape_params)
+
+                    if not jobs.empty:
+                        logger.info(f"Found {len(jobs)} jobs using cleaned company name: {cleaned_company_name}")
 
         print(jobs)
         return jobs
@@ -546,11 +652,11 @@ def parse_arguments():
         argparse.Namespace: Parsed arguments object containing all parameters
 
     Required Arguments:
-        csv_file: Path to input CSV file with company names
-        location: Geographic location for job search
-        output_dir: Directory for output files
+        --csv: Path to input CSV file with company names
+        --location: Geographic location for job search
 
     Optional Arguments:
+        --output: Output directory for files (default: current directory)
         --start: Starting row index (default: 0)
         --end: Ending row index (default: process all)
         --hours-old: Filter by hours since posting (default: 720)
@@ -561,7 +667,7 @@ def parse_arguments():
         --distance: Search radius in miles (default: 50)
 
     Example Usage:
-        python index.py companies.csv "San Francisco, CA" ./output --hours-old 168 --job-type fulltime
+        python index.py --csv companies.csv --location "San Francisco, CA" --hours-old 168 --job-type fulltime
     """
     parser = argparse.ArgumentParser(
         description='Enhanced LinkedIn Job Scraper with comprehensive filtering options',
@@ -569,10 +675,10 @@ def parse_arguments():
         epilog="""
 Examples:
   Basic usage:
-    python %(prog)s companies.csv "San Francisco, CA" ./output
+    python %(prog)s --csv companies.csv --location "San Francisco, CA"
 
   Advanced filtering:
-    python %(prog)s companies.csv "Remote" ./output \\
+    python %(prog)s --csv companies.csv --location "Remote" \\
         --hours-old 168 \\
         --job-type fulltime \\
         --search-term "software engineer" \\
@@ -580,7 +686,8 @@ Examples:
         --distance 25
 
   Batch processing:
-    python %(prog)s companies.csv "New York, NY" ./output \\
+    python %(prog)s --csv companies.csv --location "New York, NY" \\
+        --output ./results \\
         --start 0 --end 99 \\
         --fetch-description \\
         --job-type internship
@@ -592,16 +699,21 @@ Output Files: jobs.csv, no_jobs_found.csv, error_records.csv
 
     # Required arguments
     parser.add_argument(
-        'csv_file',
+        '--csv',
+        required=True,
         help='Input CSV file containing company names (must have "Company" column)'
     )
     parser.add_argument(
-        'location',
+        '--location',
+        required=True,
         help='Location to search for jobs (e.g., "San Francisco, CA", "Remote", "United States")'
     )
+
+    # Optional output directory
     parser.add_argument(
-        'output_dir',
-        help='Directory to save output files (created if it doesn\'t exist)'
+        '--output',
+        default='.',
+        help='Directory to save output files (created if it doesn\'t exist). Default: current directory'
     )
 
     # Optional batch processing arguments
@@ -683,9 +795,9 @@ if __name__ == "__main__":
     logger.info("=" * 80)
     logger.info("LinkedIn Job Scraper - Enhanced Version")
     logger.info("=" * 80)
-    logger.info(f"Input CSV: {args.csv_file}")
+    logger.info(f"Input CSV: {args.csv}")
     logger.info(f"Location: {args.location}")
-    logger.info(f"Output Directory: {args.output_dir}")
+    logger.info(f"Output Directory: {args.output}")
     logger.info(f"Row Range: {args.start} to {args.end if args.end else 'end'}")
     logger.info(f"Time Filter: {format_duration(args.hours_old)} ({args.hours_old} hours)")
     logger.info(f"Search Term: {args.search_term if args.search_term else 'None'}")
@@ -698,9 +810,9 @@ if __name__ == "__main__":
     logger.info("=" * 80)
 
     run_through_csv(
-        csv_file=args.csv_file,
+        csv_file=args.csv,
         location=args.location,
-        output_dir=args.output_dir,
+        output_dir=args.output,
         start_idx=args.start,
         end_idx=args.end,
         hours_old=args.hours_old,
